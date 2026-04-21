@@ -5,41 +5,39 @@ import pandas as pd
 import plotly.express as px
 from PIL import Image
 
-# 1. 페이지 설정
+# 1. 페이지 설정 및 제목 (워딩 수정)
 st.set_page_config(page_title="B&A 피부 개선 분석 리포트", layout="wide")
 
 st.title("📋 B&A 피부 개선 분석 리포트")
-st.markdown("촬영된 사진을 분석하여 피부 변화를 정량화합니다. 첫 번째 사진부터 순서대로 업로드해 주세요.")
+st.markdown("촬영된 사진을 정량 분석하여 변화를 기록합니다. 첫 번째 사진부터 순서대로 업로드해 주세요.")
 
-# 지표 가이드
-METRIC_GUIDE = {
-    "피부 밝기 (Brightness)": "↑ 높을수록 안색이 환함",
-    "피부결 (Smoothness)": "↑ 높을수록 표면이 매끄러움",
-    "홍조 (Redness)": "↓ 낮을수록 붉은기 진정",
-    "여드름/트러블 (Acne)": "↓ 낮을수록 피부 깨끗함",
-    "모공/요철 (Pores)": "↓ 낮을수록 모공 촘촘함",
-    "색소침착 (Pigmentation)": "↓ 낮을수록 기미/잡티 개선"
-}
+# 지표 정의
 POSITIVE_METRICS = ["피부 밝기 (Brightness)", "피부결 (Smoothness)"]
-ALL_ITEMS = list(METRIC_GUIDE.keys())
+NEGATIVE_METRICS = ["홍조 (Redness)", "여드름/트러블 (Acne)", "모공/요철 (Pores)", "색소침착 (Pigmentation)"]
+ALL_ITEMS = POSITIVE_METRICS + NEGATIVE_METRICS
 
-uploaded_files = st.file_uploader("사진 업로드", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+# 파일 업로드
+uploaded_files = st.file_uploader("사진을 업로드하세요 (Before부터 순서대로)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
-def analyze_logic(image):
+def analyze_skin_pro(image):
     img = np.array(image.convert('RGB'))
     img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2Lab)
-    l, a, _ = cv2.split(lab)
     
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2Lab)
+    l, a, b = cv2.split(lab)
     brightness = np.mean(l)
     redness = np.mean(a)
+    
     red_mask = cv2.inRange(a, 145, 255)
-    acne_score = (np.sum(red_mask > 0) / red_mask.size) * 1000
+    acne_score = (np.sum(red_mask > 0) / red_mask.size) * 1000 
+    
     edges = cv2.Canny(gray, 50, 150)
     pore_score = (np.sum(edges > 0) / edges.size) * 100
+    
     grain = np.std(gray)
     smoothness = 100 - grain
+    
     pigment_score = (np.sum(gray < 80) / gray.size) * 100
 
     return {
@@ -53,75 +51,82 @@ def analyze_logic(image):
 
 if uploaded_files:
     results = []
-    # [섹션 1] 상단 사진 기록 복구
+    
+    # [추가] 상단 사진 기록 섹션
     st.subheader("📸 사진 기록")
     img_cols = st.columns(len(uploaded_files))
+    
     for i, file in enumerate(uploaded_files):
         label = "Before" if i == 0 else f"After {i}"
         img = Image.open(file)
-        analysis = analyze_logic(img)
-        analysis["회차"] = label
+        analysis = analyze_skin_pro(img)
+        analysis["회차"] = label # '세션' 워딩 제거를 위해 '회차'로 변경
         results.append(analysis)
+        
         with img_cols[i]:
             st.image(img, caption=label, use_container_width=True)
-
+    
     df = pd.DataFrame(results)
-    df_melted = df.melt(id_vars=["회차"], value_vars=ALL_ITEMS, var_name="지표", value_name="점수")
-
-    # [섹션 2] 이전 버전 레이아웃 복구 (좌측: 통합 선 그래프 / 우측: 개별 막대 그래프)
+    
     st.divider()
-    col_left, col_right = st.columns([1.2, 1])
-
-    with col_left:
-        st.subheader("📊 통합 변화 추이")
-        # '세션' 워딩 제거 및 수치 표기
-        fig_main = px.line(df_melted, x="회차", y="점수", color="지표", markers=True, text="점수")
-        fig_main.update_traces(textposition="top center")
-        fig_main.update_layout(xaxis_title="", yaxis_title="점수")
+    st.subheader("📊 지표별 개선 추이 분석")
+    
+    tab1, tab2 = st.tabs(["종합 분석", "상세 항목별"])
+    
+    with tab1:
+        # 통합 막대 그래프 (텍스트/수치 추가)
+        fig_main = px.bar(df, x="회차", y=ALL_ITEMS, barmode="group", 
+                          text_auto=True, title="전체 지표 변화 상황")
+        fig_main.update_layout(xaxis_title="", yaxis_title="상대 점수")
         st.plotly_chart(fig_main, use_container_width=True)
+        
+    with tab2:
+        item_cols = st.columns(2)
+        for idx, item in enumerate(ALL_ITEMS):
+            with item_cols[idx % 2]:
+                # 꺾은선 그래프 (수치 텍스트 추가)
+                fig_item = px.line(df, x="회차", y=item, title=f"{item} 추이", 
+                                   markers=True, text=item)
+                fig_item.update_traces(textposition="top center")
+                fig_item.update_yaxes(range=[df[item].min()*0.9, df[item].max()*1.1])
+                fig_item.update_layout(xaxis_title="")
+                st.plotly_chart(fig_item, use_container_width=True)
 
-    with col_right:
-        st.subheader("📈 항목별 상세 분석")
-        # 이전 버전처럼 항목 선택 시 막대 그래프로 수치 확인
-        selected_item = st.selectbox("항목 선택", ALL_ITEMS)
-        fig_sub = px.bar(df, x="회차", y=selected_item, text=selected_item, color="회차")
-        fig_sub.update_layout(xaxis_title="", yaxis_title="점수", showlegend=False)
-        st.plotly_chart(fig_sub, use_container_width=True)
-
-    # [섹션 3] 최종 개선 성과 리포트 (전체 6개 항목 메트릭 유지)
+    # 최종 개선 성과 리포트 (기존 틀 유지)
     if len(results) >= 2:
         st.divider()
         st.subheader("🎯 최종 개선 성과 리포트")
-        last_idx = len(results) - 1
-        summary_cols = st.columns(len(ALL_ITEMS))
         
+        before = results[0]
+        after = results[-1]
+        
+        summary_cols = st.columns(len(ALL_ITEMS))
         for i, item in enumerate(ALL_ITEMS):
-            val_now = df.loc[last_idx, item]
-            val_before = df.loc[0, item]
-            
             if item in POSITIVE_METRICS:
-                diff = ((val_now - val_before) / val_before) * 100 if val_before != 0 else 0
+                diff = ((after[item] - before[item]) / before[item]) * 100
+                guide = "↑ 높을수록 환함/매끄러움"
             else:
-                diff = ((val_before - val_now) / val_before) * 100 if val_before != 0 else 0
+                diff = ((before[item] - after[item]) / before[item]) * 100
+                guide = "↓ 낮을수록 깨끗함/촘촘함"
             
             with summary_cols[i]:
-                # pt 단위 제거, 개선율만 표시
-                st.metric(label=f"{item}", value=f"{val_now}", delta=f"{diff:.1f}% 개선")
-                st.caption(METRIC_GUIDE[item])
+                # pt 제거, 수치만 노출
+                st.metric(label=item, value=after[item], delta=f"{diff:.1f}% 개선")
+                st.caption(guide)
 
+        st.divider()
         # 베스트 회차 판독
-        best_idx = 0
-        max_total_impro = -9999
-        for idx in range(1, len(df)):
-            total_impro = 0
-            for item in ALL_ITEMS:
-                if item in POSITIVE_METRICS: total_impro += (df.loc[idx, item] - df.loc[0, item])
-                else: total_impro += (df.loc[0, item] - df.loc[idx, item])
-            if total_impro > max_total_impro:
-                max_total_impro = total_impro
-                best_idx = idx
+        best_session_name = df.loc[1:, :].apply(lambda x: sum([x[m] if m in POSITIVE_METRICS else -x[m] for m in ALL_ITEMS]), axis=1).idxmax()
+        best_label = df.loc[best_session_name, "회차"]
         
-        st.success(f"💡 분석 결과, 첫 방문 대비 가장 종합적으로 개선된 시점은 **[{df.loc[best_idx, '회차']}]** 입니다.")
+        col_res1, col_res2 = st.columns([2, 1])
+        with col_res1:
+            st.success(f"🏆 분석 결과, 피부 컨디션이 가장 극대화된 시점은 **[{best_label}]** 입니다.")
+            st.write("#### 📝 분석 요약")
+            st.write(f"- 초기 대비 전반적인 피부 밸런스가 좋아졌으며, 현재 **{best_label}**에서 가장 높은 개선율을 보입니다.")
+        with col_res2:
+            st.write("#### 📍 관리 가이드")
+            st.write("- 현재의 피부 상태를 유지하기 위해 꾸준한 홈케어를 권장합니다.")
 
 else:
-    st.info("사진을 업로드하면 상세 리포트가 생성됩니다.")
+    st.info("사진을 업로드하면 정밀 분석 리포트가 생성됩니다.")
