@@ -9,9 +9,9 @@ from PIL import Image
 st.set_page_config(page_title="B&A 피부 개선 분석 리포트", layout="wide")
 
 st.title("📋 B&A 피부 개선 분석 리포트")
-st.markdown("촬영된 사진을 정량 분석하여 변화를 기록합니다. 첫 번째 사진부터 순서대로 업로드해 주세요.")
+st.markdown("촬영된 사진을 분석하여 피부 변화를 정량화합니다. 첫 번째 사진부터 순서대로 업로드해 주세요.")
 
-# 2. 지표 가이드 (리포트에만 활용)
+# 지표 가이드
 METRIC_GUIDE = {
     "피부 밝기 (Brightness)": "↑ 높을수록 안색이 환함",
     "피부결 (Smoothness)": "↑ 높을수록 표면이 매끄러움",
@@ -53,7 +53,7 @@ def analyze_logic(image):
 
 if uploaded_files:
     results = []
-    # [섹션 1] 사진 기록 (상단 배치)
+    # [섹션 1] 상단 사진 기록 복구
     st.subheader("📸 사진 기록")
     img_cols = st.columns(len(uploaded_files))
     for i, file in enumerate(uploaded_files):
@@ -66,24 +66,32 @@ if uploaded_files:
             st.image(img, caption=label, use_container_width=True)
 
     df = pd.DataFrame(results)
+    df_melted = df.melt(id_vars=["회차"], value_vars=ALL_ITEMS, var_name="지표", value_name="점수")
 
-    # [섹션 2] 지표별 변화 추이 (이전 만족하셨던 항목별 막대 그래프 형태)
+    # [섹션 2] 이전 버전 레이아웃 복구 (좌측: 통합 선 그래프 / 우측: 개별 막대 그래프)
     st.divider()
-    st.subheader("📊 항목별 상세 변화")
-    
-    item_cols = st.columns(2)
-    for idx, item in enumerate(ALL_ITEMS):
-        with item_cols[idx % 2]:
-            # 막대 그래프로 변경 및 수치 표기
-            fig = px.bar(df, x="회차", y=item, color="회차", text=item, title=item)
-            fig.update_layout(xaxis_title="", yaxis_title="점수", showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+    col_left, col_right = st.columns([1.2, 1])
 
-    # [섹션 3] 최종 개선 성과 리포트 (전체 항목 유지)
+    with col_left:
+        st.subheader("📊 통합 변화 추이")
+        # '세션' 워딩 제거 및 수치 표기
+        fig_main = px.line(df_melted, x="회차", y="점수", color="지표", markers=True, text="점수")
+        fig_main.update_traces(textposition="top center")
+        fig_main.update_layout(xaxis_title="", yaxis_title="점수")
+        st.plotly_chart(fig_main, use_container_width=True)
+
+    with col_right:
+        st.subheader("📈 항목별 상세 분석")
+        # 이전 버전처럼 항목 선택 시 막대 그래프로 수치 확인
+        selected_item = st.selectbox("항목 선택", ALL_ITEMS)
+        fig_sub = px.bar(df, x="회차", y=selected_item, text=selected_item, color="회차")
+        fig_sub.update_layout(xaxis_title="", yaxis_title="점수", showlegend=False)
+        st.plotly_chart(fig_sub, use_container_width=True)
+
+    # [섹션 3] 최종 개선 성과 리포트 (전체 6개 항목 메트릭 유지)
     if len(results) >= 2:
         st.divider()
         st.subheader("🎯 최종 개선 성과 리포트")
-        
         last_idx = len(results) - 1
         summary_cols = st.columns(len(ALL_ITEMS))
         
@@ -97,11 +105,11 @@ if uploaded_files:
                 diff = ((val_before - val_now) / val_before) * 100 if val_before != 0 else 0
             
             with summary_cols[i]:
-                # pt 제거, 수치만 표시
+                # pt 단위 제거, 개선율만 표시
                 st.metric(label=f"{item}", value=f"{val_now}", delta=f"{diff:.1f}% 개선")
-                st.caption(METRIC_GUIDE[item]) # 가이드 문구 유지
+                st.caption(METRIC_GUIDE[item])
 
-        # 베스트 시점 판독 로직
+        # 베스트 회차 판독
         best_idx = 0
         max_total_impro = -9999
         for idx in range(1, len(df)):
