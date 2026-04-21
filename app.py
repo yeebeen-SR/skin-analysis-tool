@@ -1,4 +1,4 @@
-import streamlit as simport streamlit as st
+import streamlit as st
 import cv2
 import numpy as np
 import pandas as pd
@@ -32,7 +32,7 @@ def analyze_logic(image):
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2Lab)
     l, a, _ = cv2.split(lab)
     
-    # 분석 알고리즘 (0~100 스케일 기반 수치화)
+    # 분석 알고리즘
     brightness = np.mean(l)
     redness = np.mean(a)
     red_mask = cv2.inRange(a, 145, 255)
@@ -82,7 +82,6 @@ if uploaded_files:
 
     with col_right:
         st.subheader("📈 항목별 상세 지표")
-        # 항목별로 작은 그래프들을 나열하여 수치를 더 명확히 확인
         selected_item = st.selectbox("확인할 지표를 선택하세요", ALL_ITEMS)
         fig_sub = px.line(df, x="회차", y=selected_item, markers=True, text=selected_item)
         fig_sub.update_traces(line_color='#FF4B4B', textposition="top center")
