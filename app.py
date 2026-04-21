@@ -5,83 +5,95 @@ import pandas as pd
 import plotly.express as px
 from PIL import Image
 
-# 페이지 설정
-st.set_page_config(page_title="AX 피부 분석 자동화 툴", layout="wide")
+# 1. 프로젝트 이름 및 워딩 정리 (요청하신 비즈니스 스타일)
+st.set_page_config(page_title="스킨 분석 리포트", layout="wide")
 
-st.title("✨ AI 피부 분석 & 비포/애프터 대시보드")
+st.title("🔬 AI 기반 피부 진단 및 개선율 대시보드")
 st.markdown("""
-이 툴은 업로드된 사진을 분석하여 피부의 **홍조(Redness)**와 **톤 균일도(Tone)** 변화를 정량화합니다.
-비포 사진부터 순서대로 업로드해 주세요.
+본 솔루션은 사진 분석을 통해 **피부 밝기, 홍조, 모공/요철, 색소침착** 지표를 정량화합니다.  
+비포 사진부터 순서대로 업로드하여 개선율을 확인하세요.
 """)
 
-# 1. 파일 업로드 섹션
-uploaded_files = st.file_uploader("피부 사진들을 업로드하세요 (여러 장 가능)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+# 분석 항목 정의
+ITEMS = ["피부 밝기 (Brightness)", "홍조 (Redness)", "모공/요철 (Pores)", "색소침착 (Pigmentation)"]
+
+# 파일 업로드
+uploaded_files = st.file_uploader("피부 사진을 업로드하세요 (여러 장 가능)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
 def analyze_skin(image):
-    # 이미지를 OpenCV 형식으로 변환
     img = np.array(image.convert('RGB'))
     img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     
-    # 1. 홍조(Redness) 분석: Lab 색공간에서 a채널(빨강-초록) 활용
+    # 1. 피부 밝기 (L채널 평균) - 높을수록 밝음
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2Lab)
     l, a, b = cv2.split(lab)
-    redness_score = np.mean(a) # a값이 높을수록 붉은기가 강함
+    brightness = np.mean(l)
     
-    # 2. 톤 균일도(Tone) 분석: 밝기(L) 채널의 표준편차 활용
-    # 표준편차가 낮을수록 톤이 균일함 (우리는 점수화를 위해 역산)
-    tone_std = np.std(l)
-    tone_score = 100 - tone_std # 100에 가까울수록 균일
+    # 2. 홍조 (a채널 평균) - 낮을수록 개선
+    redness = np.mean(a)
     
-    return round(redness_score, 2), round(tone_score, 2)
+    # 3. 모공/요철 (에지 검출) - 낮을수록 개선
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 30, 70)
+    pore_score = (np.sum(edges > 0) / edges.size) * 100
+    
+    # 4. 색소침착 (어두운 영역 추출) - 낮을수록 개선
+    _, dark_spots = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
+    pigment_score = (np.sum(dark_spots > 0) / dark_spots.size) * 100
+
+    return {
+        "피부 밝기 (Brightness)": round(brightness, 1),
+        "홍조 (Redness)": round(redness, 1),
+        "모공/요철 (Pores)": round(pore_score * 0.7, 1),
+        "색소침착 (Pigmentation)": round(pigment_score * 0.5, 1)
+    }
 
 if uploaded_files:
-    cols = st.columns(len(uploaded_files))
     data = []
+    cols = st.columns(len(uploaded_files))
     
-    # 2. 이미지 전시 및 분석
     for i, file in enumerate(uploaded_files):
         img = Image.open(file)
-        red_val, tone_val = analyze_skin(img)
+        analysis = analyze_skin(img)
         
-        # 데이터 저장
-        label = f"{i+1}회차" if i > 0 else "Before"
-        data.append({"세션": label, "홍조 지수": red_val, "톤 균일도": tone_val})
+        label = f"Session {i}" if i > 0 else "Before"
+        analysis["세션"] = label
+        data.append(analysis)
         
         with cols[i]:
             st.image(img, caption=label, use_container_width=True)
-            st.write(f"🔴 홍조: {red_val}")
-            st.write(f"⚪ 톤: {tone_val}")
+            for key, val in list(analysis.items())[:-1]:
+                st.write(f"- {key}: **{val}**")
 
-    # 3. 데이터 시각화
     df = pd.DataFrame(data)
     
     st.divider()
-    st.subheader("📊 분석 결과 리포트")
+    st.subheader("📊 지표별 개선 추이")
     
-    col_chart1, col_chart2 = st.columns(2)
+    # 그래프 출력
+    fig = px.line(df, x="세션", y=ITEMS, title="항목별 변화 추이", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
     
-    with col_chart1:
-        fig_red = px.line(df, x="세션", y="홍조 지수", title="회차별 홍조 변화 (낮을수록 개선)", markers=True)
-        st.plotly_chart(fig_red, use_container_width=True)
-        
-    with col_chart2:
-        fig_tone = px.line(df, x="세션", y="톤 균일도", title="회차별 톤 균일도 변화 (높을수록 개선)", markers=True)
-        st.plotly_chart(fig_tone, use_container_width=True)
-
-    # 4. 개선율 계산 (Before vs Last After)
     if len(data) >= 2:
         before = data[0]
         after = data[-1]
         
-        red_impro = ((before['홍조 지수'] - after['홍조 지수']) / before['홍조 지수']) * 100
-        tone_impro = ((after['톤 균일도'] - before['톤 균일도']) / before['톤 균일도']) * 100
+        st.subheader("🎯 최종 개선율 요약 (Before 대비)")
+        summary_cols = st.columns(len(ITEMS))
         
-        st.success(f"### 📢 분석 요약")
-        st.write(f"- 첫 회차 대비 **홍조가 {red_impro:.1f}% 개선**되었습니다.")
-        st.write(f"- 피부 톤 균일도가 **{tone_impro:.1f}% 향상**되었습니다.")
+        for idx, item in enumerate(ITEMS):
+            # 피부 밝기는 높을수록 좋음, 나머지는 낮을수록 좋음
+            if "밝기" in item:
+                impro = ((after[item] - before[item]) / before[item]) * 100 if before[item] != 0 else 0
+            else:
+                impro = ((before[item] - after[item]) / before[item]) * 100 if before[item] != 0 else 0
+            
+            with summary_cols[idx]:
+                st.metric(label=item, value=f"{after[item]}", delta=f"{impro:.1f}%")
         
-        best_session = df.loc[df['톤 균일도'].idxmax()]['세션']
-        st.info(f"💡 전체 세션 중 피부 상태가 가장 좋았던 회차는 **[{best_session}]** 입니다.")
+        # 간단 명료한 AI 코멘트
+        st.info(f"✨ 분석 결과, 전체 세션 중 피부 상태가 가장 좋았던 회차는 **[{df.loc[:, ITEMS].sum(axis=1).idxmin() if '밝기' not in ITEMS[0] else '분석중'}회차]** 입니다.")
 
 else:
-    st.info("사진을 업로드하면 분석이 시작됩니다.")
+    st.info("비포/애프터 사진을 업로드하시면 분석 리포트가 생성됩니다.")
