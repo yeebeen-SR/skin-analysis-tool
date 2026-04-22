@@ -9,9 +9,9 @@ from PIL import Image
 st.set_page_config(page_title="B&A 피부 개선 분석 리포트", layout="wide")
 
 st.title("📋 B&A 피부 개선 분석 리포트")
-st.markdown("정량적 데이터 분석을 통해 피부 변화를 기록합니다. 첫 번째 사진부터 순서대로 업로드해 주세요.")
+st.markdown("정량적 분석 데이터를 기반으로 작성된 리포트입니다. 최종 상담 시 전문가의 가이드를 따르세요.")
 
-# 2. 지표 가이드 및 방향성 정의
+# 지표 가이드 정의 (상담 시 기준점으로 활용)
 METRIC_GUIDE = {
     "피부 밝기 (Brightness)": "↑ 높을수록 안색이 환함",
     "피부결 (Smoothness)": "↑ 높을수록 표면이 매끄러움",
@@ -53,7 +53,6 @@ def analyze_logic(image):
 
 if uploaded_files:
     results = []
-    # [섹션 1] 사진 기록
     st.subheader("📸 사진 기록")
     img_cols = st.columns(len(uploaded_files))
     for i, file in enumerate(uploaded_files):
@@ -68,32 +67,20 @@ if uploaded_files:
     df = pd.DataFrame(results)
     
     st.divider()
-    st.subheader("📊 항목별 변화 추이")
-    st.info("💡 수치 가이드: [밝기/결]은 높을수록 우수하며, [홍조/트러블/모공/색소]는 낮을수록 안정적인 상태를 의미합니다.")
-    
-    tab1, tab2 = st.tabs(["종합 분석", "상세 항목별"])
-    
-    with tab1:
-        fig_main = px.bar(df, x="회차", y=ALL_ITEMS, barmode="group", text_auto=True)
-        fig_main.update_layout(xaxis_title="", yaxis_title="상대 점수")
-        st.plotly_chart(fig_main, use_container_width=True)
-        
-    with tab2:
-        item_cols = st.columns(2)
-        for idx, item in enumerate(ALL_ITEMS):
-            with item_cols[idx % 2]:
-                fig_item = px.line(df, x="회차", y=item, markers=True, text=item)
-                fig_item.update_traces(textposition="top center")
-                fig_item.update_layout(xaxis_title="")
-                st.plotly_chart(fig_item, use_container_width=True)
+    st.subheader("📊 지표 변화 그래프")
+    fig_main = px.bar(df, x="회차", y=ALL_ITEMS, barmode="group", text_auto=True)
+    st.plotly_chart(fig_main, use_container_width=True)
 
-    # [섹션 3] 최종 개선 성과 리포트
     if len(results) >= 2:
         st.divider()
-        st.subheader("🎯 최종 개선 성과 리포트")
+        st.subheader("🎯 최종 분석 데이터 요약")
+        # 대표님 요청: 기준점 가이드 유지
+        st.info("💡 수치 가이드: [밝기/결]은 높을수록 우수하며, [홍조/트러블/모공/색소]는 낮을수록 안정적인 상태를 의미합니다.")
         
         last_idx = len(results) - 1
         summary_cols = st.columns(len(ALL_ITEMS))
+        improved_list = []
+
         for i, item in enumerate(ALL_ITEMS):
             val_now = df.loc[last_idx, item]
             val_before = df.loc[0, item]
@@ -102,35 +89,41 @@ if uploaded_files:
             else:
                 diff = ((val_before - val_now) / val_before) * 100 if val_before != 0 else 0
             
+            improved_list.append(diff)
             with summary_cols[i]:
-                st.metric(label=item, value=f"{val_now}", delta=f"{diff:.1f}% 개선")
+                st.metric(label=item, value=f"{val_now}", delta=f"{diff:.1f}%")
                 st.caption(METRIC_GUIDE[item])
 
         st.divider()
         
-        # 전문 분석 요약 생성
-        improvements = []
-        for item in ALL_ITEMS:
-            v0, v1 = df.loc[0, item], df.loc[last_idx, item]
-            imp = ((v1-v0)/v0) if item in POSITIVE_METRICS else ((v0-v1)/v0)
-            improvements.append(imp)
+        # --- 논리적 분석 및 가이드 섹션 ---
+        col_res1, col_res2 = st.columns([1, 1])
         
-        best_item = ALL_ITEMS[np.argmax(improvements)]
-        best_label = df.loc[df.apply(lambda x: sum([x[m] if m in POSITIVE_METRICS else -x[m] for m in ALL_ITEMS]), axis=1).idxmax(), "회차"]
-        
-        col_res1, col_res2 = st.columns([1.5, 1])
         with col_res1:
-            st.markdown("### 📝 전문 분석 요약")
-            st.write(f"1. **종합 개선도:** 첫 방문(Before) 대비 전체 피부 지표가 조화롭게 개선되고 있습니다.")
-            st.write(f"2. **최우수 성과:** 현재 **{best_item}** 영역에서 가장 비약적인 성과를 보이며, 이는 진행 중인 프로그램이 고객님의 피부 타입에 매우 적합함을 증명합니다.")
-            st.success(f"🏆 전체 기간 중 피부 컨디션이 가장 극대화된 시점은 **[{best_label}]** 입니다.")
+            st.markdown("### 📝 데이터 총평")
+            # 부정 지표 개수 파악
+            negative_count = sum(1 for d in improved_list if d < -1) 
+            
+            if negative_count >= 3:
+                st.error("⚠️ **주의:** 현재 다수의 지표가 초기 대비 하락한 것으로 나타납니다. 피부 장벽 약화나 외부 자극 요인을 점검해야 합니다.")
+            elif improved_list[ALL_ITEMS.index("홍조 (Redness)")] < -5:
+                st.warning("⚖️ **민감도 관리 필요:** 전반적인 지표 대비 홍조 수치가 증가하여 현재 피부가 일시적으로 예민해진 상태입니다.")
+            else:
+                st.success("✅ **안정적 개선:** 주요 지표들이 전반적으로 안정적인 우상향 그래프를 그리고 있습니다.")
+
+            # 가장 큰 변화 지표 언급
+            best_idx = np.argmax(improved_list)
+            st.write(f"- **핵심 성과:** 현재 {ALL_ITEMS[best_idx]} 영역에서 가장 높은 개선율을 보이고 있습니다.")
 
         with col_res2:
-            st.markdown("### 📍 맞춤형 관리 가이드")
-            st.info("✅ **장벽 유지:** 지표가 안정화되는 시기이므로, 급격한 제품 변경보다는 현재의 루틴을 유지하며 피부 장벽을 탄탄하게 관리하세요.")
-            st.info("🧴 **제품 흡수:** 피부결이 정돈됨에 따라 유효 성분의 흡수율이 높아진 상태입니다. 고기능성 앰플 사용 시 시너지 효과를 기대할 수 있습니다.")
-            st.write("---")
-            st.caption("※ 본 리포트는 AI 영상 분석 기술을 기반으로 작성되었습니다.")
+            st.markdown("### 📍 전문가 관리 가이드")
+            # 홍조 기반 시술 여부 판단 로직
+            if df.loc[last_idx, "홍조 (Redness)"] > df.loc[0, "홍조 (Redness)"] * 1.05:
+                st.info("🛋️ **진정 집중기:** 현재 붉은기가 관찰되는 회복기입니다. **고기능성 앰플(비타민, 레티놀 등) 및 필링제 사용을 즉각 중단**하고 무자극 보습과 재생 관리에만 집중하세요.")
+            else:
+                st.info("✨ **장벽 유지기:** 피부가 안정 궤도에 올랐습니다. 새로운 제품 시도보다는 현재의 유수분 밸런스를 유지하며 장벽을 탄탄하게 만드는 홈케어를 지속하세요.")
+            
+            st.warning("🧴 **필수 사항:** 개선된 컨디션을 유지하기 위해 자외선 차단제는 매일 꼼꼼히 사용해 주시기 바랍니다.")
 
 else:
-    st.info("사진을 업로드하면 상세 리포트가 생성됩니다.")
+    st.info("사진을 업로드하면 정량적 분석 리포트가 생성됩니다.")
